@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outlet Locator</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        #fileInput, #searchInput {
+            margin: 10px 0;
+        }
+        #downloadButton {
+            margin: 10px 0;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Outlet Locator</h1>
+    <input type="file" id="fileInput" accept=".xlsx" />
+    <input type="text" id="searchInput" placeholder="Search Outlet by Name" />
+    <button id="downloadButton">Download Nearby Outlets</button>
+    <div id="map"></div>
+
+    <script>
+        let map = L.map('map').setView([25.463301, 78.577860], 13); // Default center
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+        }).addTo(map);
+
+        let outletData = [];
+        let markers = [];
+        let nearbyOutlets = [];
+        let radiusCircle = null;
+
+        // Function to calculate distance using Haversine formula
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Radius of Earth in meters
+            const toRad = (x) => (x * Math.PI) / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a =
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(toRad(lat1)) *
+                    Math.cos(toRad(lat2)) *
+                    Math.sin(dLon / 2) *
+                    Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; // Distance in meters
+        }
+
+        // Add markers to map
+        function addMarkers() {
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+
+            outletData.forEach(outlet => {
+                const marker = L.marker([outlet.latitude, outlet.longitude])
+                    .addTo(map)
+                    .bindPopup(`<b>${outlet.name}</b><br>Code: ${outlet.code}`);
+                marker.on('click', () => {
+                    marker.openPopup(); // Show popup with name and code
+                    filterNearbyOutlets(outlet);
+                });
+                markers.push(marker);
+            });
+        }
+
+        // Filter outlets within 500m radius and draw circle
+        function filterNearbyOutlets(selectedOutlet) {
+            nearbyOutlets = outletData.filter(outlet => {
+                const distance = getDistance(
+                    selectedOutlet.latitude,
+                    selectedOutlet.longitude,
+                    outlet.latitude,
+                    outlet.longitude
+                );
+                return distance <= 500;
+            });
+
+            // Draw radius circle
+            if (radiusCircle) {
+                map.removeLayer(radiusCircle);
+            }
+            radiusCircle = L.circle([selectedOutlet.latitude, selectedOutlet.longitude], {
+                color: 'blue',
+                fillColor: '#add8e6',
+                fillOpacity: 0.4,
+                radius: 500 // 500 meters
+            }).addTo(map);
+
+            // Enable the download button
+            const downloadButton = document.getElementById('downloadButton');
+            downloadButton.style.display = 'block';
+            downloadButton.onclick = downloadNearbyOutlets;
+        }
+
+        // Download nearby outlets as Excel file
+        function downloadNearbyOutlets() {
+            const worksheet = XLSX.utils.json_to_sheet(nearbyOutlets);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Nearby Outlets");
+            XLSX.writeFile(workbook, "Nearby_Outlets.xlsx");
+        }
+
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', (event) => {
+            const query = event.target.value.toLowerCase();
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+
+            const filteredOutlets = outletData.filter(outlet =>
+                outlet.name.toLowerCase().includes(query)
+            );
+
+            filteredOutlets.forEach(outlet => {
+                const marker = L.marker([outlet.latitude, outlet.longitude])
+                    .addTo(map)
+                    .bindPopup(`<b>${outlet.name}</b><br>Code: ${outlet.code}`);
+                marker.on('click', () => {
+                    marker.openPopup();
+                    filterNearbyOutlets(outlet);
+                });
+                markers.push(marker);
+            });
+        });
+
+        // Handle file upload
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheetName = workbook.SheetNames[0];
+                const sheet = workbook.Sheets[sheetName];
+                const json = XLSX.utils.sheet_to_json(sheet);
+
+                outletData = json.map(row => ({
+                    code: row['Outlet HUL Code'],
+                    name: row['Outlet Name'],
+                    latitude: parseFloat(row['Outlet Latitude']),
+                    longitude: parseFloat(row['Outlet Longitude']),
+                }));
+
+                addMarkers();
+            };
+
+            reader.readAsArrayBuffer(file);
+        });
+    </script>
+</body>
+</html>
